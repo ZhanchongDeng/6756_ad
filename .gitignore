@@ -1,0 +1,10 @@
+# from l5kit examples
+l5kit-*
+agent_motion_prediction
+planning
+# data
+prediction-dataset
+agent_prediction/models
+# misc
+.DS_Store
+.ipynb_checkpoints
