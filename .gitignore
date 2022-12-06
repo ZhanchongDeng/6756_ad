@@ -5,6 +5,7 @@ planning
 # data
 prediction-dataset
 agent_prediction/models
+ego_planning/models
 # misc
 .DS_Store
 .ipynb_checkpoints
