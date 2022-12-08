@@ -9,3 +9,4 @@ ego_planning/models
 # misc
 .DS_Store
 .ipynb_checkpoints
+ego_planning/__pycache__
