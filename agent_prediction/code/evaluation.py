@@ -61,8 +61,8 @@ def forward(data, model, device, criterion):
 
 if __name__ == '__main__':
 
-    data_root = "../../prediction-dataset/"
-    model_root = "../"
+    data_root = "/data/hc2225/prediction-dataset/"
+    model_root = "/home/hc2225/av/agent_prediction"
 
     pred_path = os.path.join(model_root, "models", "pred.csv")
     model_path = os.path.join(model_root, "models", "bl_it500.pt")

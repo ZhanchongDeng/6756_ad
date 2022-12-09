@@ -64,10 +64,10 @@ def forward(data, model, device, criterion):
 if __name__ == '__main__':
 
     data_root = "/data/hc2225/prediction-dataset/"
+    model_root = "/home/hc2225/av/agent_prediction"
     os.environ["L5KIT_DATA_FOLDER"] = data_root
     dm = LocalDataManager(None)
     # get config
-    model_root = "/home/hc2225/planning/"
     cfg = load_config_data(os.path.join(model_root, "code", "baseline_config.yaml"))
 
     # ===== INIT DATASET
