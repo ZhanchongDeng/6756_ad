@@ -108,9 +108,8 @@ class BaseEgoDataset(Dataset):
         data_ego = self.get_frame(scene_index, state_index)
         agent_indices = self.prediction_dataset.get_frame_indices(index)
 
-        if not len(agent_indices):
-            prediction_dimension = np.zeros(self.cfg["raster_params"]["raster_size"])
-        else:
+        prediction_dimension = np.zeros(self.cfg["raster_params"]["raster_size"])
+        if len(agent_indices):
             im_ego = self.rasterizer.to_rgb(data_ego["image"].transpose(1, 2, 0))
             center = np.asarray(self.cfg["raster_params"]["ego_center"]) * self.cfg["raster_params"]["raster_size"]
             
@@ -126,15 +125,14 @@ class BaseEgoDataset(Dataset):
 
             # convert coordinates to AV point-of-view so we can draw them
             predicted_positions = transform_points(np.concatenate(predicted_positions), data_ego["raster_from_world"])
-            # print max and min of predicted positions
-            print(np.max(predicted_positions.flatten()), np.min(predicted_positions.flatten()))
             prediction_dimension = np.zeros(self.cfg["raster_params"]["raster_size"])
-            # TODO: why is there negatives? we are so close
             # for pos in positions:
             #     pred_waypoint = pos[:2]
             #     cv2.circle(on_image, tuple(pred_waypoint.astype(np.int)), radius, rgb_color, -1)
-
-            
+            # negative has no effect motehr fker
+            for pos in predicted_positions:
+                if (pos >= 0).all() and (pos < self.cfg["raster_params"]["raster_size"]).all():
+                    prediction_dimension[tuple(pos.astype(np.int))] = 1
         
         # add 1 extra dimension before concatenating at 0
         prediction_dimension = np.expand_dims(prediction_dimension, axis=0)

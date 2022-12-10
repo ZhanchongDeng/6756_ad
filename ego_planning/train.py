@@ -24,7 +24,6 @@ from tqdm import tqdm
 from l5kit.visualization import PREDICTED_POINTS_COLOR, TARGET_POINTS_COLOR, draw_trajectory
 
 DATASET_DIR_PATH = "../prediction-dataset/"
-CONFIG_PATH = "./config.yaml"
 SAVED_MODEL_PATH = "./models/"
 
 def build_agent_prediction_model(config_path) -> torch.nn.Module:
@@ -61,15 +60,28 @@ def forward_agent_prediction(data, model, device, criterion):
     loss = loss.mean()
     return loss, outputs
 
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--use-prediction", action="store_true", default=False)
+    parser.add_argument("--prediction-model-path", type=str, default="../agent_prediction/models/bl_it500.pt")
+    parser.add_argument("--prediction-config-path", type=str, default="../agent_prediction/code/baseline_config.yaml")
+    parser.add_argument("--use-gpu", action="store_true", default=False)
+    parser.add_argument("--config-path", type=str, default="configs/aggregate_config.yaml")
 
-def main(args):
+    args = parser.parse_args()
+
     # set env variable for data
     os.environ["L5KIT_DATA_FOLDER"] = DATASET_DIR_PATH
     dm = LocalDataManager(None)
     # get config
-    cfg = load_config_data(CONFIG_PATH)
+    cfg = load_config_data(args.config_path)
 
-    device = torch.device("cpu")
+    if args.use_gpu:
+        # use cuda on linux & windows
+        #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = torch.device("mps") # can't use worker > 1 for some reason. Still faster than cpu and 16 workers.
+    else:
+        device = torch.device("cpu")
 
     # ===== INIT DATASET
     if args.use_prediction:
@@ -90,13 +102,15 @@ def main(args):
     # ===== INIT DATASET
     train_zarr = ChunkedDataset(dm.require(cfg["train_data_loader"]["key"])).open()
     agent_dataset = AgentDataset(cfg, train_zarr, rasterizer)
-    ego_train_dataset = AggregatedDataset(cfg, agent_dataset.dataset, rasterizer, perturbation, agent_prediction_model, agent_dataset, device)
+    if args.use_prediction:
+        ego_train_dataset = AggregatedDataset(cfg, agent_dataset.dataset, rasterizer, None, agent_prediction_model, agent_dataset, device)
+    else:
+        ego_train_dataset = EgoDataset(cfg, train_zarr, rasterizer, perturbation)
 
     print("ego dataset:\n", ego_train_dataset)
     print("agent dataset:\n", agent_dataset)
 
     # ===== INIT MODEL
-
     # TODO: not sure if this is correct
     num_input_channels = rasterizer.num_channels() + 1 if args.use_prediction else rasterizer.num_channels()
     print(num_input_channels)
@@ -110,10 +124,9 @@ def main(args):
     
     # ===== INIT DATALOADER
     train_cfg = cfg["train_data_loader"]
-    ego_train_dataloader = DataLoader(ego_train_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"], num_workers=train_cfg["num_workers"])
+    ego_train_dataloader = DataLoader(ego_train_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"], num_workers= train_cfg["num_workers"])
     
     ego_planning_model = ego_planning_model.to(device)
-    ego_train_dataset.prediction_model = ego_train_dataset.prediction_model.to(device)
     
     optimizer = optim.Adam(ego_planning_model.parameters(), lr=1e-3)
 
@@ -123,13 +136,14 @@ def main(args):
     losses_train = []
     ego_planning_model.train()
     torch.set_grad_enabled(True)
-
+    
     for _ in progress_bar:
         try:
             data = next(tr_it)
         except StopIteration:
             tr_it = iter(ego_train_dataloader)
             data = next(tr_it)
+        
         # Forward pass
         data = {k: v.float().to(device) for k, v in data.items()}
         result = ego_planning_model(data)
@@ -141,8 +155,7 @@ def main(args):
 
         losses_train.append(loss.item())
         progress_bar.set_description(f"loss: {loss.item()} loss(avg): {np.mean(losses_train)}")
-        break
-    return
+    
     # create save dir
     Path(SAVED_MODEL_PATH).mkdir(parents=True, exist_ok=True)
 
@@ -153,16 +166,7 @@ def main(args):
     plt.savefig(Path(SAVED_MODEL_PATH) / f"losses_{cfg['train_params']['name']}.png")
 
     # ===== SAVE MODEL
-    to_save = torch.jit.script(model.cpu())
+    to_save = torch.jit.script(ego_planning_model.cpu())
     path_to_save = str(Path(SAVED_MODEL_PATH, f"planning_model_{cfg['train_params']['name']}.pt"))
     to_save.save(path_to_save)
     print(f"MODEL STORED at {path_to_save}")
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--use-prediction", action="store_true", default=True)
-    parser.add_argument("--prediction-model-path", type=str, default="../agent_prediction/models/bl_it500.pt")
-    parser.add_argument("--prediction_config-path", type=str, default="../agent_prediction/code/baseline_config.yaml")
-
-    args = parser.parse_args()
-    main(args)
