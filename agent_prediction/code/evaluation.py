@@ -79,8 +79,9 @@ if __name__ == '__main__':
     data_root = "/data/hc2225/prediction-dataset"
     model_root = "/home/hc2225/av/agent_prediction"
 
+    model_name = "EFB3_pretrain_it30k.pt"
     pred_path = os.path.join(model_root, "models", "pred.csv")
-    model_path = os.path.join(model_root, "models", "EFB3_pretrain_it30k.pt")
+    model_path = os.path.join(model_root, "models", model_name)
 
     os.environ["L5KIT_DATA_FOLDER"] = data_root
     dm = LocalDataManager(None)
