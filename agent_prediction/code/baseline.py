@@ -6,8 +6,10 @@ import numpy as np
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
-from torchvision.models.resnet import resnet50
+from torchvision.models import resnet50, ResNet50_Weights
+from torchvision.models import efficientnet_b3, EfficientNet_B3_Weights
 from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
 
 from l5kit.configs import load_config_data
 from l5kit.data import LocalDataManager, ChunkedDataset
@@ -28,22 +30,41 @@ from datetime import datetime
 
 def build_model(cfg: Dict) -> torch.nn.Module:
     # load pre-trained Conv2D model
-    model = resnet50(pretrained=True)
+    # model = resnet50(pretrained=True)
+    # model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
+
+    # EfficientNetB3
+    model = efficientnet_b3(weights=EfficientNet_B3_Weights.IMAGENET1K_V1)
 
     # change input channels number to match the rasterizer's output
     num_history_channels = (cfg["model_params"]["history_num_frames"] + 1) * 2
     num_in_channels = 3 + num_history_channels
-    model.conv1 = nn.Conv2d(
-        num_in_channels,
-        model.conv1.out_channels,
-        kernel_size=model.conv1.kernel_size,
-        stride=model.conv1.stride,
-        padding=model.conv1.padding,
-        bias=False,
-    )
-    # change output size to (X, Y) * number of future states
     num_targets = 2 * cfg["model_params"]["future_num_frames"]
-    model.fc = nn.Linear(in_features=2048, out_features=num_targets)
+
+    if model.__class__.__name__ == "ResNet":
+        model.conv1 = nn.Conv2d(
+            num_in_channels,
+            model.conv1.out_channels,
+            kernel_size=model.conv1.kernel_size,
+            stride=model.conv1.stride,
+            padding=model.conv1.padding,
+            bias=False,
+        )
+        # change output size to (X, Y) * number of future states
+        model.fc = nn.Linear(in_features=2048, out_features=num_targets)
+    elif model.__class__.__name__ == "EfficientNet":
+        first_layer = model.features[0][0]
+        model.features[0][0] = nn.Conv2d(
+            num_in_channels,
+            first_layer.out_channels,
+            kernel_size=first_layer.kernel_size,
+            stride=first_layer.stride,
+            padding=first_layer.padding,
+            bias=False,
+        )
+        model.classifier[1] = nn.Linear(in_features=1536, out_features=num_targets, bias=True)
+    
+    print('model loaded')
 
     return model
 
@@ -63,7 +84,7 @@ def forward(data, model, device, criterion):
 
 if __name__ == '__main__':
 
-    data_root = "/data/hc2225/prediction-dataset/"
+    data_root = "/data/hc2225/prediction-dataset"
     model_root = "/home/hc2225/av/agent_prediction"
     os.environ["L5KIT_DATA_FOLDER"] = data_root
     dm = LocalDataManager(None)
@@ -84,6 +105,8 @@ if __name__ == '__main__':
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
     criterion = nn.MSELoss(reduction="none")
 
+    tb_writer = SummaryWriter(log_dir=os.path.join(model_root, "models"))
+
     distributed = True
     if distributed:
         # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
@@ -93,29 +116,58 @@ if __name__ == '__main__':
     print(train_dataset)
 
     # ==== TRAIN LOOP
-    tr_it = iter(train_dataloader)
-    progress_bar = tqdm(range(cfg["train_params"]["max_num_steps"]))
+
     losses_train = []
-    for _ in progress_bar:
-        try:
-            data = next(tr_it)
-        except StopIteration:
-            tr_it = iter(train_dataloader)
-            data = next(tr_it)
-        model.train()
-        torch.set_grad_enabled(True)
-        loss, _ = forward(data, model, device, criterion)
+    tr_it = iter(train_dataloader)
 
-        # multiple gpu training
-        loss = loss.sum()
+    train_mode = 'step'
+    if train_mode == 'step':
+        progress_bar = tqdm(range(cfg["train_params"]["max_num_steps"]))
+        for i in progress_bar:
+            try:
+                data = next(tr_it)
+            except StopIteration:
+                tr_it = iter(train_dataloader)
+                data = next(tr_it)
+            model.train()
+            torch.set_grad_enabled(True)
+            loss, _ = forward(data, model, device, criterion)
 
-        # Backward pass
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+            # multiple gpu training
+            loss = loss.sum()
+            tb_writer.add_scalar("Loss", loss, i)
 
-        losses_train.append(loss.item())
-        progress_bar.set_description(f"loss: {loss.item()} loss(avg): {np.mean(losses_train)}")
+            # Backward pass
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            losses_train.append(loss.item())
+            progress_bar.set_description(f"loss: {loss.item()} loss(avg): {np.mean(losses_train)}")
+    else:
+        epoches = cfg["train_params"]["max_epoch"]
+        progress_bar = tqdm(total=epoches * len(tr_it))
+        for epoch in range(epoches):
+            for batch_idx, data in enumerate(train_dataloader):
+                model.train()
+                torch.set_grad_enabled(True)
+                loss, _ = forward(data, model, device, criterion)
+
+                # multiple gpu training
+                loss = loss.sum()
+
+                tb_writer.add_scalar("Loss", loss, epoch * len(train_dataloader) + batch_idx)
+
+                # Backward pass
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                losses_train.append(loss.item())
+                progress_bar.update(1)
+                # progress_bar.set_description(f"loss: {loss.item()} loss(avg): {np.mean(losses_train)}")
+
+    tb_writer.close()
 
     plt.plot(np.arange(len(losses_train)), losses_train, label="train loss")
     plt.legend()
