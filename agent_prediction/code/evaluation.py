@@ -7,6 +7,7 @@ import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torchvision.models.resnet import resnet50
+from torchvision.models import efficientnet_b3
 from tqdm import tqdm
 
 from l5kit.configs import load_config_data
@@ -26,22 +27,36 @@ import os
 
 def build_model(cfg: Dict) -> torch.nn.Module:
     # load pre-trained Conv2D model
-    model = resnet50(pretrained=True)
+    # model = resnet50()
+    model = efficientnet_b3()
 
     # change input channels number to match the rasterizer's output
     num_history_channels = (cfg["model_params"]["history_num_frames"] + 1) * 2
     num_in_channels = 3 + num_history_channels
-    model.conv1 = nn.Conv2d(
-        num_in_channels,
-        model.conv1.out_channels,
-        kernel_size=model.conv1.kernel_size,
-        stride=model.conv1.stride,
-        padding=model.conv1.padding,
-        bias=False,
-    )
-    # change output size to (X, Y) * number of future states
     num_targets = 2 * cfg["model_params"]["future_num_frames"]
-    model.fc = nn.Linear(in_features=2048, out_features=num_targets)
+
+    if model.__class__.__name__ == "ResNet":
+        model.conv1 = nn.Conv2d(
+            num_in_channels,
+            model.conv1.out_channels,
+            kernel_size=model.conv1.kernel_size,
+            stride=model.conv1.stride,
+            padding=model.conv1.padding,
+            bias=False,
+        )
+        # change output size to (X, Y) * number of future states
+        model.fc = nn.Linear(in_features=2048, out_features=num_targets)
+    elif model.__class__.__name__ == "EfficientNet":
+        first_layer = model.features[0][0]
+        model.features[0][0] = nn.Conv2d(
+            num_in_channels,
+            first_layer.out_channels,
+            kernel_size=first_layer.kernel_size,
+            stride=first_layer.stride,
+            padding=first_layer.padding,
+            bias=False,
+        )
+        model.classifier[1] = nn.Linear(in_features=1536, out_features=num_targets, bias=True)
 
     return model
 
@@ -61,36 +76,36 @@ def forward(data, model, device, criterion):
 
 if __name__ == '__main__':
 
-    data_root = "/data/hc2225/prediction-dataset/"
+    data_root = "/data/hc2225/prediction-dataset"
     model_root = "/home/hc2225/av/agent_prediction"
 
     pred_path = os.path.join(model_root, "models", "pred.csv")
-    model_path = os.path.join(model_root, "models", "bl_it500.pt")
+    model_path = os.path.join(model_root, "models", "EFB3_pretrain_it30k.pt")
 
     os.environ["L5KIT_DATA_FOLDER"] = data_root
     dm = LocalDataManager(None)
     cfg = load_config_data(os.path.join(model_root, "code", "baseline_config.yaml"))
 
-    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    device = torch.device("cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = build_model(cfg).to(device)
     criterion = nn.MSELoss(reduction="none")
 
     model.load_state_dict(torch.load(model_path, map_location=device))
 
-    distributed = False
+    distributed = True
     if distributed:
         model = torch.nn.DataParallel(model)
 
     # ==== EVALUATION
     num_frames_to_chop = 100
     eval_cfg = cfg["val_data_loader"]
-    eval_base_path = create_chopped_dataset(dm.require(eval_cfg["key"]), cfg["raster_params"]["filter_agents_threshold"], 
-                                num_frames_to_chop, cfg["model_params"]["future_num_frames"], MIN_FUTURE_STEPS)
+    # eval_base_path = create_chopped_dataset(dm.require(eval_cfg["key"]), cfg["raster_params"]["filter_agents_threshold"], 
+    #                             num_frames_to_chop, cfg["model_params"]["future_num_frames"], MIN_FUTURE_STEPS)
 
-    eval_zarr_path = str(Path(eval_base_path) / Path(dm.require(eval_cfg["key"])).name)
-    eval_mask_path = str(Path(eval_base_path) / "mask.npz")
-    eval_gt_path = str(Path(eval_base_path) / "gt.csv")
+    eval_base_path = Path(dm.require(eval_cfg["key"]))
+    eval_zarr_path = str(eval_base_path / "validate.zarr")
+    eval_mask_path = str(eval_base_path / "mask.npz")
+    eval_gt_path = str(eval_base_path / "gt.csv")
 
     eval_zarr = ChunkedDataset(eval_zarr_path).open()
     eval_mask = np.load(eval_mask_path)["arr_0"]
@@ -130,6 +145,7 @@ if __name__ == '__main__':
                 coords=np.concatenate(future_coords_offsets_pd),
                 )
     
-    metrics = compute_metrics_csv(eval_gt_path, pred_path, [neg_multi_log_likelihood, time_displace])
+    # metrics = compute_metrics_csv(eval_gt_path, pred_path, [neg_multi_log_likelihood, time_displace])
+    metrics = compute_metrics_csv(eval_gt_path, pred_path, [neg_multi_log_likelihood])
     for metric_name, metric_mean in metrics.items():
         print(metric_name, metric_mean)
