@@ -30,18 +30,19 @@ from datetime import datetime
 
 def build_model(cfg: Dict) -> torch.nn.Module:
     # load pre-trained Conv2D model
-    # model = resnet50(pretrained=True)
-    # model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
-
-    # EfficientNetB3
-    model = efficientnet_b3(weights=EfficientNet_B3_Weights.IMAGENET1K_V1)
 
     # change input channels number to match the rasterizer's output
     num_history_channels = (cfg["model_params"]["history_num_frames"] + 1) * 2
     num_in_channels = 3 + num_history_channels
     num_targets = 2 * cfg["model_params"]["future_num_frames"]
 
-    if model.__class__.__name__ == "ResNet":
+    model = None
+    if cfg["model_params"]["model_architecture"] == "resnet50":
+        if cfg["model_params"]["pretrained"]:
+            model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
+        else:
+            model  = resnet50()
+        
         model.conv1 = nn.Conv2d(
             num_in_channels,
             model.conv1.out_channels,
@@ -52,7 +53,12 @@ def build_model(cfg: Dict) -> torch.nn.Module:
         )
         # change output size to (X, Y) * number of future states
         model.fc = nn.Linear(in_features=2048, out_features=num_targets)
-    elif model.__class__.__name__ == "EfficientNet":
+
+    elif cfg["model_params"]["model_architecture"] == "efficientnet_b3":
+        if cfg["model_params"]["pretrained"]:
+            model = efficientnet_b3(weights=EfficientNet_B3_Weights.IMAGENET1K_V1)
+        else:
+            model = efficientnet_b3()
         first_layer = model.features[0][0]
         model.features[0][0] = nn.Conv2d(
             num_in_channels,
@@ -169,16 +175,17 @@ if __name__ == '__main__':
 
     tb_writer.close()
 
-    plt.plot(np.arange(len(losses_train)), losses_train, label="train loss")
-    plt.legend()
-    fig_name = cfg['model_params']['model_architecture'] + '_' + datetime.now().strftime('%Y-%m-%d-%H:%M:%S') + '.jpg'
-    plt.savefig(fig_name)
+    # plot loss curve, replaced by tensorboard now
+    # plt.plot(np.arange(len(losses_train)), losses_train, label="train loss")
+    # plt.legend()
+    # fig_name = cfg['model_params']['model_architecture'] + '_' + datetime.now().strftime('%Y-%m-%d-%H:%M:%S') + '.jpg'
+    # plt.savefig(fig_name)
 
     path_to_save = os.path.join(model_root, "models", "planning_model.pt")
     torch.save(model.module.state_dict(), path_to_save)
     print(f"MODEL STORED at {path_to_save}")
 
-    # ==== EVALUATION
+    # ==== EVALUATION -> moved to evaluation.py now
     # num_frames_to_chop = 100
     # eval_cfg = cfg["val_data_loader"]
     # eval_base_path = create_chopped_dataset(dm.require(eval_cfg["key"]), cfg["raster_params"]["filter_agents_threshold"], 

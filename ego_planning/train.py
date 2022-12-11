@@ -23,29 +23,58 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from l5kit.visualization import PREDICTED_POINTS_COLOR, TARGET_POINTS_COLOR, draw_trajectory
+# import missing stuff from build_agent_model
+from torchvision.models import resnet50, ResNet50_Weights
+from torchvision.models import efficientnet_b3, EfficientNet_B3_Weights
 
 DATASET_DIR_PATH = "../prediction-dataset/"
 SAVED_MODEL_PATH = "./models/"
 
+#def build_agent_prediction_model(config_path) -> torch.nn.Module:
 def build_agent_prediction_model(config_path) -> torch.nn.Module:
     cfg = load_config_data(Path(config_path))
     # load pre-trained Conv2D model
-    model = resnet50(pretrained=True)
 
     # change input channels number to match the rasterizer's output
     num_history_channels = (cfg["model_params"]["history_num_frames"] + 1) * 2
     num_in_channels = 3 + num_history_channels
-    model.conv1 = nn.Conv2d(
-        num_in_channels,
-        model.conv1.out_channels,
-        kernel_size=model.conv1.kernel_size,
-        stride=model.conv1.stride,
-        padding=model.conv1.padding,
-        bias=False,
-    )
-    # change output size to (X, Y) * number of future states
     num_targets = 2 * cfg["model_params"]["future_num_frames"]
-    model.fc = nn.Linear(in_features=2048, out_features=num_targets)
+
+    model = None
+    if cfg["model_params"]["model_architecture"] == "resnet50":
+        if cfg["model_params"]["pretrained"]:
+            model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
+        else:
+            model  = resnet50()
+        
+        model.conv1 = nn.Conv2d(
+            num_in_channels,
+            model.conv1.out_channels,
+            kernel_size=model.conv1.kernel_size,
+            stride=model.conv1.stride,
+            padding=model.conv1.padding,
+            bias=False,
+        )
+        # change output size to (X, Y) * number of future states
+        model.fc = nn.Linear(in_features=2048, out_features=num_targets)
+
+    elif cfg["model_params"]["model_architecture"] == "efficientnet_b3":
+        if cfg["model_params"]["pretrained"]:
+            model = efficientnet_b3(weights=EfficientNet_B3_Weights.IMAGENET1K_V1)
+        else:
+            model = efficientnet_b3()
+        first_layer = model.features[0][0]
+        model.features[0][0] = nn.Conv2d(
+            num_in_channels,
+            first_layer.out_channels,
+            kernel_size=first_layer.kernel_size,
+            stride=first_layer.stride,
+            padding=first_layer.padding,
+            bias=False,
+        )
+        model.classifier[1] = nn.Linear(in_features=1536, out_features=num_targets, bias=True)
+    
+    print('model loaded')
 
     return model
 
@@ -64,7 +93,7 @@ def forward_agent_prediction(data, model, device, criterion):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--use-prediction", action="store_true", default=False)
-    parser.add_argument("--prediction-model-path", type=str, default="../agent_prediction/models/bl_it500.pt")
+    parser.add_argument("--prediction-model-path", type=str, default="../agent_prediction/models/EFB3_pretrain_it30k.pt")
     parser.add_argument("--prediction-config-path", type=str, default="../agent_prediction/code/baseline_config.yaml")
     parser.add_argument("--use-gpu", action="store_true", default=False)
     parser.add_argument("--config-path", type=str, default="configs/aggregate_config.yaml")

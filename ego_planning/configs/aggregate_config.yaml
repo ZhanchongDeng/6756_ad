@@ -51,21 +51,21 @@ raster_params:
 ## Data loader options
 train_data_loader:
   key: "scenes/train.zarr"
-  batch_size: 12
+  batch_size: 32
   shuffle: True
   num_workers: 0
   perturb_probability: 0.5
 
 val_data_loader:
   key: "scenes/sample.zarr"
-  batch_size: 12
+  batch_size: 64
   shuffle: False
   num_workers: 0
 
 ###################
 ## Train params
 train_params:
-  name: "with_prediction"
+  name: "with_EFB"
   checkpoint_every_n_steps: 10000
-  max_num_steps: 50
+  max_num_steps: 1000
   eval_every_n_steps: 10000

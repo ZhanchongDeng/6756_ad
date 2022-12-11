@@ -4,7 +4,9 @@ format_version: 4
 ###################
 ## Model options
 model_params:
-  model_architecture: "resnet50"
+  # model_architecture: "resnet50"
+  model_architecture: "efficientnet_b3"
+  pretrained: True
 
   history_num_frames: 0
   future_num_frames: 12
