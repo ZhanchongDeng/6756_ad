@@ -4,7 +4,9 @@ format_version: 4
 ###################
 ## Model options
 model_params:
-  model_architecture: "resnet50"
+  # model_architecture: "resnet50"
+  model_architecture: "efficientnet_b3"
+  pretrained: True
 
   history_num_frames: 0
   future_num_frames: 12
@@ -50,21 +52,22 @@ raster_params:
 ###################
 ## Data loader options
 train_data_loader:
-  key: "scenes/train.zarr"
-  batch_size: 256
+  key: "scenes/sample.zarr"
+  batch_size: 128
   shuffle: True
-  num_workers: 16
+  num_workers: 4
   perturb_probability: 0.5
 
 val_data_loader:
-  key: "scenes/sample.zarr"
-  batch_size: 1
+  key: "scenes/sample_chopped_100"
+  batch_size: 1024
   shuffle: False
-  num_workers: 16
+  num_workers: 8
 
 ###################
 ## Train params
 train_params:
-  checkpoint_every_n_steps: 10000
-  max_num_steps: 200
-  eval_every_n_steps: 10000
+  checkpoint_every_n_steps: 100000
+  max_num_steps: 29000
+  max_epoch: 1
+  eval_every_n_steps: 100000
