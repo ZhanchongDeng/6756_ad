@@ -1,4 +1,5 @@
 import os
+import copy
 from pathlib import Path
 import argparse
 from typing import Dict
@@ -111,7 +112,6 @@ if __name__ == '__main__':
     print("agent dataset:\n", agent_dataset)
 
     # ===== INIT MODEL
-    # TODO: not sure if this is correct
     num_input_channels = rasterizer.num_channels() + 1 if args.use_prediction else rasterizer.num_channels()
     print(num_input_channels)
     ego_planning_model = RasterizedPlanningModel(
@@ -128,13 +128,14 @@ if __name__ == '__main__':
     
     ego_planning_model = ego_planning_model.to(device)
     
-    optimizer = optim.Adam(ego_planning_model.parameters(), lr=1e-3)
+    optimizer = optim.Adam(ego_planning_model.parameters(), lr=1e-4)
 
     # ===== TRAIN LOOP
     tr_it = iter(ego_train_dataloader)
     progress_bar = tqdm(range(cfg["train_params"]["max_num_steps"]))
     losses_train = []
     ego_planning_model.train()
+    best_model, best_loss = None, float('inf')
     torch.set_grad_enabled(True)
     
     for _ in progress_bar:
@@ -153,6 +154,10 @@ if __name__ == '__main__':
         loss.backward()
         optimizer.step()
 
+        if loss.item() < best_loss:
+            best_loss = loss.item()
+            best_model = copy.deepcopy(ego_planning_model)
+
         losses_train.append(loss.item())
         progress_bar.set_description(f"loss: {loss.item()} loss(avg): {np.mean(losses_train)}")
     
@@ -166,7 +171,7 @@ if __name__ == '__main__':
     plt.savefig(Path(SAVED_MODEL_PATH) / f"losses_{cfg['train_params']['name']}.png")
 
     # ===== SAVE MODEL
-    to_save = torch.jit.script(ego_planning_model.cpu())
+    to_save = torch.jit.script(best_model.cpu())
     path_to_save = str(Path(SAVED_MODEL_PATH, f"planning_model_{cfg['train_params']['name']}.pt"))
     to_save.save(path_to_save)
     print(f"MODEL STORED at {path_to_save}")
